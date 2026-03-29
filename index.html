@@ -517,6 +517,10 @@
     50% { opacity: 0.5; transform: scale(0.75); }
   }
 
+  /* Measurement helpers for line mode — invisible intermediate render */
+  .word-measure { display: inline; white-space: normal; }
+  .para-block { display: block; }
+
   /* Done block — text already read before a mid-session mode switch */
   .done-block {
     color: var(--text-primary);
@@ -729,41 +733,108 @@
   }
 
   function tokenizeLines(text) {
+    // We can't know visual line breaks without rendering.
+    // buildDisplayLines() handles line mode by measuring layout.
+    // This function is only used for mid-session mode switch fallback.
+    // Return a single token per paragraph-line so it at least doesn't break.
     const toks = [];
     let idx = 0;
-
-    // Split into paragraphs first (one or more blank lines)
-    const paragraphs = text.split(/\n{2,}/);
-
-    paragraphs.forEach((para, pi) => {
+    const paras = text.split(/\n{2,}/);
+    paras.forEach((para, pi) => {
       if (para.trim() === '') return;
-
-      // Within each paragraph, split into individual lines if newlines exist,
-      // otherwise split on sentence boundaries
-      let lines;
-      if (para.includes('\n')) {
-        lines = para.split('\n').filter(l => l.trim() !== '');
-      } else {
-        // Split on sentence-ending punctuation followed by a space
-        // Keep the punctuation attached to the preceding sentence
-        lines = para.match(/[^.!?]+[.!?]+[\s]*/g) || [para];
-        lines = lines.map(l => l.trim()).filter(l => l.length > 0);
-      }
-
-      lines.forEach(line => {
-        toks.push({ type: 'line', text: line, displayText: line, idx: idx++ });
+      const rawLines = para.split('\n');
+      rawLines.forEach(line => {
+        if (line.trim()) toks.push({ type: 'line', text: line, displayText: line.trim(), idx: idx++ });
       });
-
-      // Add paragraph gap after each paragraph except the last
-      if (pi < paragraphs.length - 1) {
-        toks.push({ type: 'para-gap', text: '' });
-      }
+      if (pi < paras.length - 1) toks.push({ type: 'para-gap', text: '' });
     });
-
     return toks;
   }
 
-  // ---- Render tokens into a container ----
+  // ---- Build display: LINE MODE uses DOM measurement ----
+  // Renders words as inline spans, measures which share the same rendered top,
+  // then collapses them into clickable line-row divs.
+  function buildDisplayLines(text) {
+    const area = document.getElementById('displayArea');
+    area.innerHTML = '';
+
+    // Step 1: render text preserving paragraph structure
+    // Split into paragraphs; within each para render word spans inline
+    const paras = text.split(/\n{2,}/);
+    const wordSpans = []; // [{el, paraIdx}]
+
+    paras.forEach((para, pi) => {
+      if (para.trim() === '') return;
+
+      const paraEl = document.createElement('div');
+      paraEl.className = 'para-block';
+      if (pi > 0) paraEl.style.marginTop = '0.9em';
+
+      // split para lines (for hard-wrapped text), then words
+      const paraLines = para.split('\n');
+      paraLines.forEach((line, li) => {
+        if (li > 0) paraEl.appendChild(document.createElement('br'));
+        line.split(/(\s+)/).forEach(chunk => {
+          if (/^\s+$/.test(chunk)) {
+            paraEl.appendChild(document.createTextNode(' '));
+          } else if (chunk.length > 0) {
+            const sp = document.createElement('span');
+            sp.className = 'word-measure';
+            sp.textContent = chunk;
+            paraEl.appendChild(sp);
+            wordSpans.push({ el: sp, para: pi });
+          }
+        });
+      });
+
+      area.appendChild(paraEl);
+    });
+
+    // Step 2: force layout then measure top positions
+    // Group consecutive word spans that share the same top into a visual line
+    area.getBoundingClientRect(); // force reflow
+
+    const lines = []; // [{words:[{el,para}], top}]
+    wordSpans.forEach(ws => {
+      const top = Math.round(ws.el.getBoundingClientRect().top);
+      if (lines.length === 0 || top !== lines[lines.length - 1].top || ws.para !== lines[lines.length - 1].para) {
+        lines.push({ words: [ws], top, para: ws.para });
+      } else {
+        lines[lines.length - 1].words.push(ws);
+      }
+    });
+
+    // Step 3: clear and rebuild as clickable line-row divs
+    area.innerHTML = '';
+    tokens = [];
+    let idx = 0;
+    let lastPara = -1;
+
+    lines.forEach(line => {
+      if (line.para !== lastPara && lastPara !== -1) {
+        // paragraph gap
+        tokens.push({ type: 'para-gap', text: '' });
+        const gap = document.createElement('span');
+        gap.className = 'para-gap';
+        area.appendChild(gap);
+      }
+      lastPara = line.para;
+
+      const lineText = line.words.map(w => w.el.textContent).join(' ');
+      const tok = { type: 'line', text: lineText, displayText: lineText, idx: idx++ };
+      tokens.push(tok);
+
+      const div = document.createElement('div');
+      div.className = 'token-line';
+      div.id = 'tok-' + tok.idx;
+      div.dataset.idx = tok.idx;
+      div.textContent = lineText;
+      div.onclick = () => seekTo(tok.idx);
+      area.appendChild(div);
+    });
+  }
+
+  // ---- Render tokens into a container (word mode) ----
   function renderTokens(toks, container) {
     toks.forEach((tok) => {
       if (tok.type === 'para-gap') {
@@ -853,10 +924,16 @@
     isPaused = false;
     isPlaying = true;
 
-    tokens = mode === 'word' ? tokenizeWords(text) : tokenizeLines(text);
-    buildDisplay(tokens);
+    if (mode === 'line') {
+      // buildDisplayLines renders, measures, then populates tokens[]
+      document.getElementById('playbackPanel').classList.add('visible');
+      buildDisplayLines(text);
+    } else {
+      tokens = tokenizeWords(text);
+      buildDisplay(tokens);
+      document.getElementById('playbackPanel').classList.add('visible');
+    }
 
-    document.getElementById('playbackPanel').classList.add('visible');
     document.getElementById('btnPlay').disabled = true;
     document.getElementById('btnPause').disabled = false;
     document.getElementById('btnStop').disabled = false;
