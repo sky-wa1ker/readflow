@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReadFlow — Text Highlighter</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f12;
+    --surface: #14171c;
+    --surface2: #1c2028;
+    --border: #252a33;
+    --accent: #00e5a0;
+    --accent-dim: rgba(0, 229, 160, 0.12);
+    --accent-mid: rgba(0, 229, 160, 0.35);
+    --text-primary: #e8eaf0;
+    --text-secondary: #6b7585;
+    --text-muted: #3e4556;
+    --highlight-word: #ffe066;
+    --highlight-sentence: rgba(0, 229, 160, 0.18);
+    --highlight-sentence-border: #00e5a0;
+    --font-mono: 'JetBrains Mono', 'DM Mono', 'Fira Code', monospace;
+    --radius: 10px;
+    --transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  [data-theme="light"] {
+    --bg: #f4f5f0;
+    --surface: #ffffff;
+    --surface2: #eaece6;
+    --border: #d4d8cc;
+    --accent: #008f63;
+    --accent-dim: rgba(0, 143, 99, 0.10);
+    --accent-mid: rgba(0, 143, 99, 0.30);
+    --text-primary: #1a1f18;
+    --text-secondary: #5a6355;
+    --text-muted: #9aaa92;
+    --highlight-word: #c47d00;
+    --highlight-sentence: rgba(0, 143, 99, 0.12);
+    --highlight-sentence-border: #008f63;
+  }
+
+  [data-theme="light"] body::before {
+    background-image:
+      linear-gradient(rgba(0,143,99,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,143,99,0.04) 1px, transparent 1px);
+  }
+
+  [data-theme="light"] .token.active-word {
+    background: rgba(196, 125, 0, 0.15);
+    color: #c47d00;
+    box-shadow: 0 0 0 2px rgba(196,125,0,0.15);
+  }
+
+  [data-theme="light"] .btn-primary {
+    color: #ffffff;
+  }
+
+  [data-theme="light"] .btn-primary:hover {
+    background: #007a55;
+    border-color: #007a55;
+  }
+
+  /* Theme toggle button */
+  .theme-toggle {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    padding: 4px 12px 4px 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: var(--transition);
+    letter-spacing: 0.05em;
+  }
+
+  .theme-toggle:hover {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+  }
+
+  .theme-toggle .theme-icon {
+    font-size: 0.85rem;
+    line-height: 1;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { font-size: 16px; }
+
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px 48px;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* subtle grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,160,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,160,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 800px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 32px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+
+  .logo span {
+    color: var(--text-secondary);
+    font-weight: 300;
+  }
+
+  .tagline {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  /* Panels */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+
+  .panel-header {
+    padding: 10px 16px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .panel-header .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0.7;
+  }
+
+  /* Textarea */
+  #inputArea {
+    width: 100%;
+    min-height: 180px;
+    max-height: 260px;
+    resize: vertical;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    line-height: 1.75;
+    color: var(--text-primary);
+    caret-color: var(--accent);
+  }
+
+  #inputArea::placeholder {
+    color: var(--text-muted);
+  }
+
+  /* Controls grid */
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 16px;
+  }
+
+  @media (max-width: 520px) {
+    .controls { grid-template-columns: 1fr; }
+  }
+
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .control-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  /* Mode toggle */
+  .toggle-group {
+    display: flex;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .toggle-btn {
+    flex: 1;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    transition: var(--transition);
+    letter-spacing: 0.04em;
+  }
+
+  .toggle-btn.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+
+  .toggle-btn:hover:not(.active) {
+    color: var(--text-primary);
+    background: var(--surface2);
+  }
+
+  /* Speed slider */
+  .speed-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 0 3px var(--accent-dim);
+    transition: var(--transition);
+  }
+
+  input[type=range]::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 6px var(--accent-dim);
+  }
+
+  input[type=range]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+    cursor: pointer;
+  }
+
+  .speed-val {
+    font-size: 0.7rem;
+    color: var(--accent);
+    min-width: 52px;
+    text-align: right;
+  }
+
+  /* Playback controls */
+  .playback {
+    display: flex;
+    gap: 8px;
+    padding: 0 16px 16px;
+    align-items: center;
+  }
+
+  .btn {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    padding: 9px 18px;
+    transition: var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #0a0f0c;
+    font-weight: 700;
+    border-color: var(--accent);
+  }
+
+  .btn-primary:hover {
+    background: #00ffc0;
+    border-color: #00ffc0;
+  }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-secondary);
+    border-color: var(--border);
+  }
+
+  .btn-secondary:hover {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+  }
+
+  .btn-danger {
+    background: transparent;
+    color: #ff6b6b;
+    border-color: var(--border);
+  }
+
+  .btn-danger:hover {
+    border-color: #ff6b6b;
+    background: rgba(255,107,107,0.08);
+  }
+
+  .btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .progress-label {
+    margin-left: auto;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+  }
+
+  /* Playback display */
+  #playbackPanel { display: none; }
+  #playbackPanel.visible { display: block; }
+
+  #displayArea {
+    padding: 20px;
+    font-size: 1rem;
+    line-height: 1.85;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-weight: 300;
+    min-height: 160px;
+    max-height: 380px;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+  }
+
+  /* Progress bar */
+  .progress-bar-wrap {
+    height: 3px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  #progressBar {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 120ms linear;
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  /* Highlights */
+  .token {
+    display: inline;
+    border-radius: 3px;
+    transition: background 200ms ease, color 200ms ease;
+  }
+
+  .token.active-word {
+    background: rgba(255, 224, 102, 0.25);
+    color: var(--highlight-word);
+    font-weight: 600;
+    box-shadow: 0 0 0 2px rgba(255,224,102,0.2);
+    border-radius: 3px;
+  }
+
+  .token.active-sentence {
+    background: var(--highlight-sentence);
+    color: var(--text-primary);
+    box-shadow: inset 3px 0 0 var(--highlight-sentence-border);
+    padding-left: 6px;
+    border-radius: 2px;
+  }
+
+  /* Line mode — block-level token */
+  .token-line {
+    display: block;
+    border-radius: 4px;
+    padding: 2px 8px 2px 6px;
+    margin: 1px 0;
+    cursor: pointer;
+    transition: background 200ms ease, color 200ms ease, box-shadow 150ms ease;
+    color: var(--text-secondary);
+  }
+
+  .token-line:hover {
+    background: var(--surface2);
+    color: var(--text-primary);
+  }
+
+  .token-line.active-line {
+    background: var(--highlight-sentence);
+    color: var(--text-primary);
+    box-shadow: inset 3px 0 0 var(--highlight-sentence-border);
+  }
+
+  .token-line.done-line {
+    color: var(--text-primary);
+  }
+
+  /* Paragraph gap in line mode */
+  .para-gap {
+    display: block;
+    height: 0.9em;
+  }
+
+  .token.done-word {
+    color: var(--text-primary);
+  }
+
+  .token.done-sentence {
+    color: var(--text-primary);
+  }
+
+  /* Word tokens are clickable */
+  .token[data-idx] {
+    cursor: pointer;
+  }
+
+  .token[data-idx]:hover {
+    background: var(--surface2);
+    border-radius: 3px;
+  }
+
+  /* Status badge */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    margin-left: auto;
+  }
+
+  .status-badge .indicator {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+
+  .status-badge.playing .indicator {
+    background: var(--accent);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  .status-badge.playing { color: var(--accent); border-color: var(--accent-mid); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.75); }
+  }
+
+  /* Done block — text already read before a mid-session mode switch */
+  .done-block {
+    color: var(--text-primary);
+    opacity: 0.45;
+  }
+
+  /* scrollbar */
+  #displayArea::-webkit-scrollbar { width: 4px; }
+  #displayArea::-webkit-scrollbar-track { background: transparent; }
+  #displayArea::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* footer */
+  footer {
+    margin-top: 24px;
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    text-align: center;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="logo">Read<span>Flow</span></div>
+    <div class="tagline">// text pace reader</div>
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark theme (T)">
+      <span class="theme-icon" id="themeIcon">☀️</span><span id="themeLabel">Light</span>
+    </button>
+  </header>
+
+  <!-- Input panel -->
+  <div class="panel" id="inputPanel">
+    <div class="panel-header"><span class="dot"></span>Input Text</div>
+    <textarea id="inputArea" placeholder="Paste your text here — articles, notes, essays, anything…&#10;&#10;Then configure the mode and speed below, and press Play."></textarea>
+  </div>
+
+  <!-- Config panel -->
+  <div class="panel">
+    <div class="panel-header"><span class="dot"></span>Configuration</div>
+    <div class="controls">
+
+      <div class="control-group">
+        <div class="control-label">Highlight Mode</div>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="modeWord" onclick="setMode('word')">Word</button>
+          <button class="toggle-btn" id="modeLine" onclick="setMode('line')">Line</button>
+        </div>
+      </div>
+
+      <div class="control-group" id="sliderWord">
+        <div class="control-label">Word Pace — <span id="paceDescWord">Normal</span></div>
+        <div class="speed-row">
+          <input type="range" id="speedSliderWord" min="60" max="3000" step="20" value="400" oninput="updateSpeed()">
+          <span class="speed-val" id="speedLabelWord">400 ms</span>
+        </div>
+      </div>
+
+      <div class="control-group" id="sliderLine" style="display:none">
+        <div class="control-label">Line Pace — <span id="paceDescLine">Normal</span></div>
+        <div class="speed-row">
+          <input type="range" id="speedSliderLine" min="2000" max="15000" step="250" value="4000" oninput="updateSpeed()">
+          <span class="speed-val" id="speedLabelLine">4.0 s</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="playback">
+      <button class="btn btn-primary" id="btnPlay" onclick="startPlayback()">▶ Play</button>
+      <button class="btn btn-secondary" id="btnPause" onclick="togglePause()" disabled>⏸ Pause</button>
+      <button class="btn btn-danger" id="btnStop" onclick="stopPlayback()" disabled>■ Stop</button>
+      <span class="progress-label" id="progressLabel">—</span>
+      <span class="status-badge" id="statusBadge"><span class="indicator"></span><span id="statusText">idle</span></span>
+    </div>
+  </div>
+
+  <!-- Playback panel -->
+  <div class="panel" id="playbackPanel">
+    <div class="panel-header"><span class="dot"></span>Reader</div>
+    <div class="progress-bar-wrap"><div id="progressBar"></div></div>
+    <div id="displayArea"></div>
+  </div>
+
+  <footer>ReadFlow &mdash; runs entirely in your browser &mdash; no data sent anywhere</footer>
+</div>
+
+<script>
+  let tokens = [];       // array of {type, text, idx?} — idx only on non-space/gap tokens
+  let currentIndex = 0;  // index into tokens[] pointing to next token to highlight
+  let timer = null;
+  let isPaused = false;
+  let mode = 'word';
+  let intervalMs = 400;
+  let isPlaying = false;
+
+  // ---- Theme ----
+  let currentTheme = 'dark';
+  function toggleTheme() {
+    currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', currentTheme === 'light' ? 'light' : '');
+    document.getElementById('themeIcon').textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+    document.getElementById('themeLabel').textContent = currentTheme === 'dark' ? 'Light' : 'Dark';
+  }
+
+  // ---- Mode switch (works mid-playback) ----
+  function setMode(m) {
+    if (mode === m) return;
+    mode = m;
+
+    document.getElementById('modeWord').classList.toggle('active', m === 'word');
+    document.getElementById('modeLine').classList.toggle('active', m === 'line');
+    document.getElementById('sliderWord').style.display = m === 'word' ? '' : 'none';
+    document.getElementById('sliderLine').style.display = m === 'line' ? '' : 'none';
+
+    updateSpeed();
+
+    if (isPlaying) {
+      const wasPlaying = !isPaused;
+      clearInterval(timer);
+      timer = null;
+
+      // Estimate char position consumed
+      let charsConsumed = 0;
+      for (let i = 0; i < currentIndex && i < tokens.length; i++) {
+        charsConsumed += tokens[i].text.length;
+      }
+
+      const fullText = document.getElementById('inputArea').value;
+      const remainingText = fullText.slice(charsConsumed);
+
+      const newToks = m === 'word' ? tokenizeWords(remainingText) : tokenizeLines(remainingText);
+      const doneText = fullText.slice(0, charsConsumed);
+
+      const area = document.getElementById('displayArea');
+      area.innerHTML = '';
+
+      if (doneText) {
+        const doneSpan = document.createElement('span');
+        doneSpan.className = 'done-block';
+        doneSpan.textContent = doneText;
+        area.appendChild(doneSpan);
+      }
+
+      renderTokens(newToks, area);
+      tokens = newToks;
+      currentIndex = 0;
+      updateProgress();
+
+      if (wasPlaying) {
+        timer = setInterval(step, intervalMs);
+        setStatus('playing');
+      } else {
+        setStatus('paused');
+      }
+    }
+  }
+
+  // ---- Speed ----
+  function updateSpeed() {
+    if (mode === 'word') {
+      const v = parseInt(document.getElementById('speedSliderWord').value);
+      intervalMs = v;
+      document.getElementById('speedLabelWord').textContent = v < 1000 ? v + ' ms' : (v/1000).toFixed(1) + ' s';
+      let desc = 'Normal';
+      if (v <= 100) desc = 'Very Fast';
+      else if (v <= 200) desc = 'Fast';
+      else if (v <= 400) desc = 'Normal';
+      else if (v <= 700) desc = 'Slow';
+      else if (v <= 1500) desc = 'Very Slow';
+      else desc = 'Extremely Slow';
+      document.getElementById('paceDescWord').textContent = desc;
+    } else {
+      const v = parseInt(document.getElementById('speedSliderLine').value);
+      intervalMs = v;
+      document.getElementById('speedLabelLine').textContent = (v / 1000).toFixed(1) + ' s';
+      let desc = 'Slow';
+      if (v <= 3000) desc = 'Slow';
+      else if (v <= 5000) desc = 'Very Slow';
+      else if (v <= 8000) desc = 'Reading Pace';
+      else if (v <= 11000) desc = 'Writing Pace';
+      else desc = 'Extremely Slow';
+      document.getElementById('paceDescLine').textContent = desc;
+    }
+
+    if (timer && !isPaused) {
+      clearInterval(timer);
+      timer = setInterval(step, intervalMs);
+    }
+  }
+
+  // ---- Tokenize ----
+  function tokenizeWords(text) {
+    const parts = text.split(/(\s+)/);
+    const toks = [];
+    let idx = 0;
+    parts.forEach(p => {
+      if (/^\n\n+/.test(p)) {
+        // Double newline = paragraph break
+        toks.push({ type: 'para-gap', text: p });
+      } else if (/^\s+$/.test(p)) {
+        toks.push({ type: 'space', text: p });
+      } else if (p.length > 0) {
+        toks.push({ type: 'word', text: p, idx: idx++ });
+      }
+    });
+    return toks;
+  }
+
+  function tokenizeLines(text) {
+    const toks = [];
+    let idx = 0;
+
+    // Split into paragraphs first (one or more blank lines)
+    const paragraphs = text.split(/\n{2,}/);
+
+    paragraphs.forEach((para, pi) => {
+      if (para.trim() === '') return;
+
+      // Within each paragraph, split into individual lines if newlines exist,
+      // otherwise split on sentence boundaries
+      let lines;
+      if (para.includes('\n')) {
+        lines = para.split('\n').filter(l => l.trim() !== '');
+      } else {
+        // Split on sentence-ending punctuation followed by a space
+        // Keep the punctuation attached to the preceding sentence
+        lines = para.match(/[^.!?]+[.!?]+[\s]*/g) || [para];
+        lines = lines.map(l => l.trim()).filter(l => l.length > 0);
+      }
+
+      lines.forEach(line => {
+        toks.push({ type: 'line', text: line, displayText: line, idx: idx++ });
+      });
+
+      // Add paragraph gap after each paragraph except the last
+      if (pi < paragraphs.length - 1) {
+        toks.push({ type: 'para-gap', text: '' });
+      }
+    });
+
+    return toks;
+  }
+
+  // ---- Render tokens into a container ----
+  function renderTokens(toks, container) {
+    toks.forEach((tok) => {
+      if (tok.type === 'para-gap') {
+        const gap = document.createElement('span');
+        gap.className = 'para-gap';
+        container.appendChild(gap);
+      } else if (tok.type === 'space') {
+        container.appendChild(document.createTextNode(tok.text));
+      } else if (tok.type === 'word') {
+        const span = document.createElement('span');
+        span.className = 'token';
+        span.id = 'tok-' + tok.idx;
+        span.dataset.idx = tok.idx;
+        span.textContent = tok.text;
+        span.onclick = () => seekTo(tok.idx);
+        container.appendChild(span);
+      } else if (tok.type === 'line') {
+        const div = document.createElement('div');
+        div.className = 'token-line';
+        div.id = 'tok-' + tok.idx;
+        div.dataset.idx = tok.idx;
+        div.textContent = tok.displayText;
+        div.onclick = () => seekTo(tok.idx);
+        container.appendChild(div);
+      }
+    });
+  }
+
+  // ---- Build display (fresh start) ----
+  function buildDisplay(toks) {
+    const area = document.getElementById('displayArea');
+    area.innerHTML = '';
+    renderTokens(toks, area);
+  }
+
+  // ---- Click-to-seek ----
+  function seekTo(tokenIdx) {
+    // tokenIdx is the .idx field on the token
+    // Find position in tokens array
+    const pos = tokens.findIndex(t => t.idx === tokenIdx);
+    if (pos < 0) return;
+
+    // Clear all highlights
+    tokens.forEach(t => {
+      if (t.idx !== undefined) {
+        const el = document.getElementById('tok-' + t.idx);
+        if (el) {
+          if (t.type === 'word') el.className = 'token';
+          else if (t.type === 'line') el.className = 'token-line';
+        }
+      }
+    });
+
+    currentIndex = pos;
+
+    if (!isPlaying) {
+      // Start playback from here
+      isPlaying = true;
+      isPaused = false;
+      document.getElementById('playbackPanel').classList.add('visible');
+      document.getElementById('btnPlay').disabled = true;
+      document.getElementById('btnPause').disabled = false;
+      document.getElementById('btnStop').disabled = false;
+      setStatus('playing');
+      step();
+      timer = setInterval(step, intervalMs);
+    } else if (isPaused) {
+      // Just move the position; highlight immediately
+      step();
+    } else {
+      // Playing — restart timer from new position
+      clearInterval(timer);
+      step();
+      timer = setInterval(step, intervalMs);
+    }
+    updateProgress();
+  }
+
+  // ---- Playback ----
+  function startPlayback() {
+    const text = document.getElementById('inputArea').value.trim();
+    if (!text) { flashInput(); return; }
+
+    clearInterval(timer);
+    timer = null;
+    currentIndex = 0;
+    isPaused = false;
+    isPlaying = true;
+
+    tokens = mode === 'word' ? tokenizeWords(text) : tokenizeLines(text);
+    buildDisplay(tokens);
+
+    document.getElementById('playbackPanel').classList.add('visible');
+    document.getElementById('btnPlay').disabled = true;
+    document.getElementById('btnPause').disabled = false;
+    document.getElementById('btnStop').disabled = false;
+
+    setStatus('playing');
+    updateProgress();
+    timer = setInterval(step, intervalMs);
+  }
+
+  function step() {
+    // Skip non-active token types (spaces, para-gaps)
+    while (currentIndex < tokens.length &&
+           tokens[currentIndex].type !== 'word' &&
+           tokens[currentIndex].type !== 'line') {
+      currentIndex++;
+    }
+    if (currentIndex >= tokens.length) {
+      finishPlayback();
+      return;
+    }
+
+    // Clear previous highlights
+    tokens.forEach(t => {
+      if (t.idx !== undefined) {
+        const el = document.getElementById('tok-' + t.idx);
+        if (!el) return;
+        if (t.type === 'word') el.className = 'token' + (t.idx < tokens[currentIndex].idx ? ' done-word' : '');
+        else if (t.type === 'line') el.className = 'token-line' + (t.idx < tokens[currentIndex].idx ? ' done-line' : '');
+      }
+    });
+
+    const cur = tokens[currentIndex];
+    const el = document.getElementById('tok-' + cur.idx);
+    if (el) {
+      el.className = (cur.type === 'word' ? 'token active-word' : 'token-line active-line');
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    currentIndex++;
+    updateProgress();
+  }
+
+  function updateProgress() {
+    const activeToks = tokens.filter(t => t.type === 'word' || t.type === 'line');
+    const curIdx = currentIndex > 0 ? tokens[currentIndex - 1]?.idx ?? 0 : 0;
+    const doneCount = activeToks.filter(t => t.idx < curIdx + 1).length;
+    const total = activeToks.length;
+    const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+    document.getElementById('progressBar').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent = doneCount + ' / ' + total;
+  }
+
+  function togglePause() {
+    if (!isPlaying) return;
+    isPaused = !isPaused;
+    const btn = document.getElementById('btnPause');
+    if (isPaused) {
+      clearInterval(timer);
+      timer = null;
+      btn.textContent = '▶ Resume';
+      setStatus('paused');
+    } else {
+      timer = setInterval(step, intervalMs);
+      btn.textContent = '⏸ Pause';
+      setStatus('playing');
+    }
+  }
+
+  function stopPlayback() {
+    clearInterval(timer);
+    timer = null;
+    isPaused = false;
+    isPlaying = false;
+    currentIndex = 0;
+    tokens = [];
+    document.getElementById('btnPlay').disabled = false;
+    document.getElementById('btnPause').disabled = true;
+    document.getElementById('btnPause').textContent = '⏸ Pause';
+    document.getElementById('btnStop').disabled = true;
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('progressLabel').textContent = '—';
+    setStatus('idle');
+    document.getElementById('displayArea').innerHTML = '';
+    document.getElementById('playbackPanel').classList.remove('visible');
+  }
+
+  function finishPlayback() {
+    clearInterval(timer);
+    timer = null;
+    isPlaying = false;
+    document.getElementById('btnPlay').disabled = false;
+    document.getElementById('btnPause').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+    document.getElementById('progressBar').style.width = '100%';
+    setStatus('done');
+    document.getElementById('statusText').textContent = 'done ✓';
+  }
+
+  function setStatus(s) {
+    const badge = document.getElementById('statusBadge');
+    const text = document.getElementById('statusText');
+    badge.className = 'status-badge ' + s;
+    if (s === 'playing') text.textContent = 'playing';
+    else if (s === 'paused') text.textContent = 'paused';
+    else if (s === 'idle') text.textContent = 'idle';
+    else if (s === 'done') text.textContent = 'done ✓';
+  }
+
+  function flashInput() {
+    const ta = document.getElementById('inputArea');
+    ta.style.outline = '2px solid #ff6b6b';
+    ta.placeholder = 'Please paste some text first…';
+    setTimeout(() => {
+      ta.style.outline = '';
+      ta.placeholder = 'Paste your text here — articles, notes, essays, anything…\n\nThen configure the mode and speed below, and press Play.';
+    }, 1500);
+    ta.focus();
+  }
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    if (e.target === document.getElementById('inputArea')) return;
+    if (e.code === 'Space') { e.preventDefault(); togglePause(); }
+    if (e.code === 'Escape') stopPlayback();
+    if (e.key === 'w' || e.key === 'W') setMode('word');
+    if (e.key === 'l' || e.key === 'L') setMode('line');
+    if (e.key === 't' || e.key === 'T') toggleTheme();
+  });
+
+  // Init
+  updateSpeed();
+</script>
+</body>
+</html>
